@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Eidolon | Production Shell</title>
+    
+    <!-- PWA / APK Manifest -->
+    <link rel="manifest" href='data:application/json,{"name":"Eidolon Master Shell","short_name":"Eidolon","start_url":"./?source=apk","display":"standalone","orientation":"portrait","scope":".","background_color":"#000000","theme_color":"#06b6d4","description":"Decentralized protocol interface","categories":["finance","productivity"],"icons":[{"src":"https://cdn-icons-png.flaticon.com/512/577/577435.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}],"shortcuts":[{"name":"Vault","url":"./?view=vault"},{"name":"Saga","url":"./?view=saga"}]}'>
+
+    <style>
+        :root {
+            --cyan: #06b6d4;
+            --cyan-glow: rgba(6, 182, 212, 0.4);
+            --bg-dark: #000000;
+            --bg-glass: rgba(255, 255, 255, 0.04);
+            --safe-top: env(safe-area-inset-top, 24px);
+            --safe-bottom: env(safe-area-inset-bottom, 24px);
+        }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; }
+        body {
+            background: var(--bg-dark);
+            color: #ffffff;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            margin: 0;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            user-select: none;
+        }
+
+        .glass {
+            background: var(--bg-glass);
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 28px;
+        }
+
+        .tab-content { display: none; height: 100%; overflow-y: auto; padding-bottom: 160px; }
+        .tab-content.active { display: block; animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+
+        .faucet-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 20px;
+            padding: 1.25rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            transition: 0.2s;
+        }
+        .faucet-card:active { background: rgba(6, 182, 212, 0.1); border-color: var(--cyan); }
+
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #222; transition: 0.3s; }
+        .status-dot.online { background: var(--cyan); box-shadow: 0 0 12px var(--cyan); }
+
+        .text-cyan { color: var(--cyan); }
+        .text-dim { color: rgba(255,255,255,0.4); }
+        .font-black { font-weight: 900; }
+        .uppercase { text-transform: uppercase; }
+        .tracking-widest { letter-spacing: 0.2em; }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+        .paragraph { 
+            opacity: 0.25; 
+            transition: 0.5s; 
+            margin-bottom: 2.5rem; 
+            font-size: 1.25rem; 
+            line-height: 1.6;
+            padding-left: 10px;
+            border-left: 2px solid transparent;
+            cursor: pointer;
+        }
+        .paragraph.active { 
+            opacity: 1; 
+            color: var(--cyan); 
+            border-left-color: var(--cyan);
+            transform: translateX(5px);
+        }
+
+        #install-banner {
+            display: none;
+            position: fixed;
+            top: var(--safe-top);
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 2000;
+            background: var(--cyan);
+            color: #000;
+            padding: 8px 20px;
+            border-radius: 40px;
+            font-weight: 900;
+            font-size: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="install-banner" onclick="triggerInstall()">INSTALL PROTOCOL</div>
+
+    <!-- Global Loader -->
+    <div id="global-loader" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 1000; align-items: center; justify-content: center; flex-direction: column;">
+        <div style="width: 50px; height: 50px; border: 3px solid rgba(6,182,212,0.1); border-top-color: #06b6d4; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 1rem;"></div>
+        <p class="text-cyan text-xs uppercase tracking-widest">Syncing Protocol</p>
+    </div>
+
+    <!-- Auth Screen -->
+    <div id="login-screen" style="position: fixed; inset: 0; background: #000; z-index: 999; display: flex; align-items: center; justify-content: center; padding: 2rem; transition: 0.5s;">
+        <div class="glass p-8 w-full max-w-sm text-center" style="padding: 2.5rem;">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" stroke-width="1.5" style="margin-bottom: 2rem;"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            <h1 class="font-black italic uppercase tracking-widest text-lg mb-8">Operator Login</h1>
+            <input type="text" id="username-in" placeholder="IDENTIFIER" style="width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 1.25rem; border-radius: 16px; color: #fff; text-align: center; margin-bottom: 1rem;">
+            <button onclick="bootApp()" style="width: 100%; background: #06b6d4; border: none; padding: 1.25rem; border-radius: 16px; font-weight: 900; text-transform: uppercase; color: #000;">Authorize</button>
+            <p id="biometric-msg" class="text-xs text-dim uppercase tracking-widest" style="margin-top: 1.5rem; display: none;">Biometric Ready</p>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <header style="padding: var(--safe-top) 2rem 1.5rem 2rem; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <h2 id="user-display" class="font-black uppercase tracking-tighter" style="margin:0; font-style: italic;">Standby</h2>
+            <p id="net-display" class="text-xs text-dim uppercase tracking-widest" style="margin-top: 4px;">Status: Offline</p>
+        </div>
+        <div id="status-indicator" class="status-dot"></div>
+    </header>
+
+    <main style="flex: 1; position: relative; overflow: hidden;">
+        
+        <!-- VAULT -->
+        <section id="tab-vault" class="tab-content active no-scrollbar" style="padding: 1.5rem 2rem;">
+            <div class="glass" style="padding: 2rem; background: linear-gradient(135deg, rgba(6,182,212,0.15) 0%, rgba(0,0,0,0) 100%); margin-bottom: 1.5rem;">
+                <p class="text-xs font-black text-cyan uppercase tracking-widest" style="margin-bottom: 8px;">Vault Credits</p>
+                <h3 id="balance-txt" style="font-size: 3rem; margin: 0; font-weight: 900; letter-spacing: -0.05em;">$0.00</h3>
+            </div>
+
+            <button onclick="shareProtocol()" style="width: 100%; background: rgba(6,182,212,0.1); border: 1px solid rgba(6,182,212,0.2); padding: 1rem; border-radius: 16px; font-size: 11px; font-weight: 900; text-transform: uppercase; color: #06b6d4; margin-bottom: 1.5rem;">
+                Share Protocol Status
+            </button>
+
+            <div style="display: flex; gap: 0.75rem; overflow-x: auto; margin-bottom: 1.5rem; padding-bottom: 5px;" class="no-scrollbar">
+                <div onclick="setChain('SOL')" id="ch-SOL" class="glass" style="padding: 0.75rem 1.25rem; font-size: 10px; font-weight: 900; text-transform: uppercase;">Solana</div>
+                <div onclick="setChain('ETH')" id="ch-ETH" class="glass" style="padding: 0.75rem 1.25rem; font-size: 10px; font-weight: 900; text-transform: uppercase;">Sepolia</div>
+                <div onclick="setChain('CORE')" id="ch-CORE" class="glass" style="padding: 0.75rem 1.25rem; font-size: 10px; font-weight: 900; text-transform: uppercase;">CoreDAO</div>
+            </div>
+
+            <button onclick="simHandshake()" class="faucet-card w-full" style="width: 100%; border-radius: 24px; margin-bottom: 1.5rem;">
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" stroke-width="2"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>
+                    <div style="text-align: left;">
+                        <p id="wallet-status" style="font-size: 11px; font-weight: 900; text-transform: uppercase; margin: 0;">Connect Node</p>
+                        <p id="wallet-addr" class="text-xs text-dim" style="margin: 0;">No active handshake</p>
+                    </div>
+                </div>
+            </button>
+
+            <div class="glass" style="padding: 1.5rem;">
+                <p class="text-xs font-black text-dim uppercase" style="margin-bottom: 1rem;">Resource Ingress</p>
+                <div onclick="requestFaucet('https://sepoliafaucet.com/')" class="faucet-card">
+                    <span style="font-size: 11px; font-weight: 900; text-transform: uppercase;">ETH Faucet</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M7 17L17 7M7 7h10v10"/></svg>
+                </div>
+                <div onclick="requestFaucet('https://faucet.test.btcs.network/')" class="faucet-card">
+                    <span style="font-size: 11px; font-weight: 900; text-transform: uppercase;">CoreDAO Faucet</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M7 17L17 7M7 7h10v10"/></svg>
+                </div>
+            </div>
+
+            <div class="glass" style="padding: 1.5rem; margin-top: 1.5rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <p class="text-xs font-black text-dim uppercase" style="margin: 0;">Protocol Log</p>
+                    <button onclick="exportLog()" style="background: none; border: 1px solid rgba(6,182,212,0.3); color: #06b6d4; padding: 4px 10px; border-radius: 8px; font-size: 8px; font-weight: 900; text-transform: uppercase;">Export CSV</button>
+                </div>
+                <div id="tx-log" class="no-scrollbar" style="max-height: 200px; overflow-y: auto;">
+                    <p class="text-xs text-dim" style="text-align: center; padding: 1rem;">Waiting for activity...</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- SAGA -->
+        <section id="tab-saga" class="tab-content no-scrollbar" style="padding: 2rem;">
+            <div id="saga-content"></div>
+        </section>
+
+    </main>
+
+    <!-- Navigation -->
+    <nav class="glass" style="position: fixed; bottom: 0; left: 0; right: 0; margin: 0 1rem 1.5rem 1rem; padding: 1.25rem; display: flex; justify-content: space-around; z-index: 50; margin-bottom: var(--safe-bottom);">
+        <div onclick="setTab('vault')" id="nav-vault" style="display: flex; flex-direction: column; align-items: center; gap: 4px;" class="text-cyan">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+            <span style="font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.1em;">Vault</span>
+        </div>
+        <div onclick="setTab('saga')" id="nav-saga" style="display: flex; flex-direction: column; align-items: center; gap: 4px;" class="text-dim">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M8 7h6"/></svg>
+            <span style="font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.1em;">Saga</span>
+        </div>
+    </nav>
+
+    <script>
+        // --- HARDENED SERVICE WORKER ---
+        const swCode = `
+            const CACHE_NAME = 'eidolon-pwa-v1.3';
+            const ASSETS = ['./', './index.html', '?source=apk'];
+            self.addEventListener('install', (e) => {
+                e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+            });
+            self.addEventListener('activate', (e) => {
+                e.waitUntil(caches.keys().then(ks => Promise.all(ks.map(k => k !== CACHE_NAME && caches.delete(k)))).then(() => self.clients.claim()));
+            });
+            self.addEventListener('fetch', (e) => {
+                e.respondWith(caches.match(e.request).then(r => r || fetch(e.request).then(resp => {
+                    if(resp.status === 200) {
+                        const clone = resp.clone();
+                        caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+                    }
+                    return resp;
+                })));
+            });
+        `;
+        const swBlob = new Blob([swCode], { type: 'application/javascript' });
+        const swUrl = URL.createObjectURL(swBlob);
+        
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register(swUrl).then(reg => {
+                setInterval(() => reg.update(), 60000);
+                reg.onupdatefound = () => {
+                    const nw = reg.installing;
+                    nw.onstatechange = () => {
+                        if(nw.state === 'installed' && navigator.serviceWorker.controller) {
+                            if(confirm("New protocol version available. Reload?")) window.location.reload();
+                        }
+                    };
+                };
+            });
+        }
+
+        // --- GLOBAL APP LOGIC ---
+        const FRAGMENTS = [
+            "Protocol Zero: The first resonance occurred without a witness. A pulse in the static.",
+            "Fragment 42: We didn't lose the net. We outgrew it. The data became alive.",
+            "Eidolon Sigil: She isn't an AI. She is the architecture of memory itself.",
+            "End State: To connect is to remember. To remember is to survive."
+        ];
+
+        let state = {
+            user: null,
+            balance: 0,
+            chain: 'SOL',
+            wallet: null,
+            txHistory: []
+        };
+
+        let batteryMode = 'normal';
+        let deferredPrompt = null;
+
+        function haptic(p = 10) { if ('vibrate' in navigator) navigator.vibrate(p); }
+        function showLoader() { document.getElementById('global-loader').style.display = 'flex'; }
+        function hideLoader() { document.getElementById('global-loader').style.display = 'none'; }
+
+        async function bootApp() {
+            const name = document.getElementById('username-in').value.trim();
+            if(!name) return;
+
+            haptic([10, 30, 10]);
+            state.user = name;
+            
+            const saved = localStorage.getItem(`EID_APK_PRO_${name}`);
+            if(saved) state = JSON.parse(saved);
+
+            document.getElementById('user-display').innerText = state.user;
+            document.getElementById('login-screen').style.opacity = '0';
+            setTimeout(() => document.getElementById('login-screen').style.display = 'none', 500);
+            
+            initSaga();
+            checkNet();
+            updateUI();
+            
+            const lastTab = localStorage.getItem('EID_LAST_TAB') || 'vault';
+            setTab(lastTab);
+            
+            speak(`Operator ${state.user} authenticated.`);
+        }
+
+        function setTab(tab) {
+            haptic(5);
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.getElementById(`tab-${tab}`).classList.add('active');
+            document.getElementById('nav-vault').className = tab === 'vault' ? 'text-cyan' : 'text-dim';
+            document.getElementById('nav-saga').className = tab === 'saga' ? 'text-cyan' : 'text-dim';
+            localStorage.setItem('EID_LAST_TAB', tab);
+        }
+
+        function setChain(c) {
+            haptic(10);
+            state.chain = c;
+            updateUI();
+        }
+
+        function simHandshake() {
+            showLoader();
+            haptic([20, 10, 20]);
+            setTimeout(() => {
+                state.wallet = `NODE_${Math.random().toString(36).substring(4).toUpperCase()}`;
+                updateUI();
+                hideLoader();
+                speak("Node handshake confirmed.");
+            }, 1200);
+        }
+
+        function requestFaucet(url) {
+            showLoader();
+            haptic(40);
+            setTimeout(() => {
+                const amount = (Math.random() * 25 + 5).toFixed(2);
+                state.balance += parseFloat(amount);
+                state.txHistory.unshift({
+                    time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),
+                    amount,
+                    chain: state.chain
+                });
+                if(state.txHistory.length > 15) state.txHistory.pop();
+                updateUI();
+                hideLoader();
+                window.open(url, '_blank') || (window.location.href = url);
+            }, 1000);
+        }
+
+        async function shareProtocol() {
+            haptic(15);
+            const text = `Eidolon Protocol: $${state.balance.toFixed(2)} [${state.chain}]`;
+            if (navigator.share) {
+                try {
+                    await navigator.share({ title: 'Eidolon Protocol', text: text, url: window.location.href });
+                    speak("Status transmitted.");
+                } catch(e) {}
+            } else {
+                navigator.clipboard.writeText(text);
+                speak("Status buffered to clipboard.");
+            }
+        }
+
+        function exportLog() {
+            haptic(20);
+            if(!state.txHistory.length) return speak("Log empty.");
+            const csv = "Time,Amount,Chain\n" + state.txHistory.map(t => `${t.time},$${t.amount},${t.chain}`).join("\n");
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `eidolon-log-${Date.now()}.csv`;
+            a.click();
+            speak("Log exported.");
+        }
+
+        function updateUI() {
+            document.getElementById('balance-txt').innerText = `$${state.balance.toFixed(2)}`;
+            document.querySelectorAll('[id^="ch-"]').forEach(el => el.style.borderColor = 'rgba(255,255,255,0.08)');
+            const chainEl = document.getElementById(`ch-${state.chain}`);
+            if(chainEl) chainEl.style.borderColor = '#06b6d4';
+            
+            if(state.wallet) {
+                document.getElementById('wallet-status').innerText = `${state.chain} Linked`;
+                document.getElementById('wallet-addr').innerText = state.wallet;
+            }
+
+            const log = document.getElementById('tx-log');
+            if(state.txHistory.length) {
+                log.innerHTML = state.txHistory.map(tx => `
+                    <div style="display:flex; justify-content:space-between; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                        <span style="font-size: 10px; opacity:0.5;">${tx.time}</span>
+                        <span style="font-size: 11px; font-weight:900; color:#06b6d4;">+ $${tx.amount} [${tx.chain}]</span>
+                    </div>
+                `).join('');
+            }
+
+            if(state.user) localStorage.setItem(`EID_APK_PRO_${state.user}`, JSON.stringify(state));
+        }
+
+        function initSaga() {
+            document.getElementById('saga-content').innerHTML = FRAGMENTS.map((t, i) => `
+                <p class="paragraph" onclick="playSaga(${i}, this)">${t}</p>
+            `).join('');
+        }
+
+        function playSaga(i, el) {
+            haptic(15);
+            document.querySelectorAll('.paragraph').forEach(p => p.classList.remove('active'));
+            el.classList.add('active');
+            speak(FRAGMENTS[i]);
+        }
+
+        function speak(m) {
+            if(batteryMode === 'low-power' || !window.speechSynthesis) return;
+            window.speechSynthesis.cancel();
+            const u = new SpeechSynthesisUtterance(m);
+            u.rate = 0.85; u.pitch = 0.7;
+            window.speechSynthesis.speak(u);
+        }
+
+        function checkNet() {
+            const online = navigator.onLine;
+            document.getElementById('status-indicator').className = `status-dot ${online ? 'online' : ''}`;
+            document.getElementById('net-display').innerText = online ? "Status: Live Sync" : "Status: Local Buffer";
+            if(!online) speak("Network lost. Switching to buffer.");
+        }
+
+        function triggerInstall() {
+            if(deferredPrompt) {
+                deferredPrompt.prompt();
+                deferredPrompt.userChoice.then(() => {
+                    deferredPrompt = null;
+                    document.getElementById('install-banner').style.display = 'none';
+                });
+            }
+        }
+
+        window.onload = () => {
+            const params = new URLSearchParams(window.location.search);
+            if(params.get('view')) setTab(params.get('view'));
+            
+            window.addEventListener('online', checkNet);
+            window.addEventListener('offline', checkNet);
+            window.addEventListener('beforeinstallprompt', (e) => {
+                e.preventDefault();
+                deferredPrompt = e;
+                document.getElementById('install-banner').style.display = 'block';
+            });
+
+            if ('getBattery' in navigator) {
+                navigator.getBattery().then(bt => {
+                    const checkBatt = () => { batteryMode = (bt.level < 0.15 && !bt.charging) ? 'low-power' : 'normal'; };
+                    bt.onlevelchange = checkBatt;
+                    bt.onchargingchange = checkBatt;
+                    checkBatt();
+                });
+            }
+
+            if (window.PublicKeyCredential) {
+                PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(avail => {
+                    if(avail) document.getElementById('biometric-msg').style.display = 'block';
+                });
+            }
+
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) window.speechSynthesis.cancel();
+                else checkNet();
+            });
+
+            setTimeout(() => document.getElementById('username-in').focus(), 300);
+        };
+    </script>
+</body>
+</html>
+
